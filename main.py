@@ -64,7 +64,7 @@ def handle_deleted_business_messages(messages):
             messages_db.pop(msg_id)
 
 # Запуск веб-сервера «пустышки», чтобы Render не закрывал приложение
-from flagging import Flask
+from flask import Flask
 app = Flask(__name__)
 @app.route('/')
 def home(): return "Бот активен"
