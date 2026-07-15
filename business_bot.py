@@ -23,12 +23,13 @@ messages_db = {}
 @bot.message_handler(commands=['start', 'status'])
 def send_welcome(message):
     status_text = (
-        "🟢 **Новый бизнес-бот успешно работает!**\n\n"
+        "🟢 Новый бизнес-бот успешно работает!\n\n"
         f"📦 Сообщений в памяти: {len(messages_db)}\n"
-        f"👤 Твой ID: `{message.from_user.id}`\n"
+        f"👤 Твой ID: {message.from_user.id}\n"
         "📡 Запущен из файла: business_bot.py"
     )
-    bot.reply_to(message, status_text, parse_mode="Markdown")
+    # Убрали parse_mode, чтобы не было ошибок разметки
+    bot.reply_to(message, status_text)
 
 @bot.message_handler(func=lambda message: message.chat.type == "private")
 def echo_all(message):
@@ -57,7 +58,7 @@ def handle_edited_business_message(message):
 
     if old_text != new_text:
         report = (
-            f"✏️ **Сообщение изменено!**\n"
+            "✏️ Сообщение изменено!\n"
             f"👤 От кого: @{user}\n"
             f"⬅️ Было: {old_text}\n"
             f"➡️ Стало: {new_text}"
@@ -77,7 +78,7 @@ def handle_deleted_business_messages(deleted_messages):
         if msg_id in messages_db:
             deleted_text = messages_db[msg_id]
             report = (
-                f"🗑 **Сообщение УДАЛЕНО!**\n"
+                "🗑 Сообщение УДАЛЕНО!\n"
                 f"📝 Текст: {deleted_text}"
             )
             try:
