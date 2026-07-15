@@ -21,19 +21,21 @@ MY_TELEGRAM_ID = 1551104336
 DB_FILE = "messages.db"
 
 # ==========================================
-# ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ SQLite
+# ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ SQLite (С НОВЫМИ ПОЛЯМИ)
 # ==========================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # Создаем таблицу для хранения сообщений
+    # Создаем таблицу с поддержкой автора сообщения и названия чата
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
             msg_id INTEGER PRIMARY KEY,
             content_type TEXT,
             text TEXT,
             file_id TEXT,
-            date_str TEXT, -- Храним дату в формате YYYY-MM-DD
+            sender_name TEXT,  -- Кто отправил сообщение
+            chat_title TEXT,   -- Название чата или имя собеседника
+            date_str TEXT,     -- Дата отправки (YYYY-MM-DD)
             timestamp REAL
         )
     ''')
@@ -42,47 +44,50 @@ def init_db():
 
 init_db()
 
-def save_to_db(msg_id, content_type, text=None, file_id=None):
-    """Безопасное сохранение сообщения в базу данных SQLite"""
+def save_to_db(msg_id, content_type, text=None, file_id=None, sender_name="Неизвестно", chat_title="Личный чат"):
+    """Сохранение сообщения с информацией об авторе и чате"""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
-        # Получаем текущую дату в формате ГГГГ-ММ-ДД
         today_date = datetime.now().strftime("%Y-%m-%d")
         now_ts = time.time()
         
         cursor.execute('''
-            INSERT OR REPLACE INTO messages (msg_id, content_type, text, file_id, date_str, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (msg_id, content_type, text, file_id, today_date, now_ts))
+            INSERT OR REPLACE INTO messages (msg_id, content_type, text, file_id, sender_name, chat_title, date_str, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (msg_id, content_type, text, file_id, sender_name, chat_title, today_date, now_ts))
         
         conn.commit()
         conn.close()
-        print(f"💾 [DB] Успешно сохранено в базу ({content_type}) {msg_id}")
+        print(f"💾 [DB] Сохранено ({content_type}) {msg_id} от {sender_name} в '{chat_title}'")
     except Exception as e:
         print(f"❌ [DB] Ошибка сохранения: {e}")
 
 def get_from_db(msg_id):
-    """Получение сообщения из базы данных SQLite"""
+    """Получение полной информации о сообщении"""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute('SELECT content_type, text, file_id FROM messages WHERE msg_id = ?', (msg_id,))
+        cursor.execute('SELECT content_type, text, file_id, sender_name, chat_title FROM messages WHERE msg_id = ?', (msg_id,))
         row = cursor.fetchone()
         conn.close()
         if row:
-            return {'type': row[0], 'text': row[1], 'file_id': row[2]}
+            return {
+                'type': row[0], 
+                'text': row[1], 
+                'file_id': row[2],
+                'sender_name': row[3] or "Неизвестно",
+                'chat_title': row[4] or "Личный чат"
+            }
     except Exception as e:
         print(f"❌ [DB] Ошибка чтения: {e}")
     return None
 
 def get_messages_by_date(date_str):
-    """Получение списка сообщений за определенную дату"""
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute('SELECT msg_id, content_type, text FROM messages WHERE date_str = ?', (date_str,))
+        cursor.execute('SELECT msg_id, content_type, text, sender_name, chat_title FROM messages WHERE date_str = ?', (date_str,))
         rows = cursor.fetchall()
         conn.close()
         return rows
@@ -91,12 +96,36 @@ def get_messages_by_date(date_str):
         return []
 
 # ==========================================
+# Вспомогательная функция для получения инфо об авторе
+# ==========================================
+def get_sender_and_chat_info(message):
+    """Красиво собирает имя отправителя и название чата"""
+    # Имя отправителя
+    if message.from_user:
+        first_name = message.from_user.first_name or ""
+        last_name = message.from_user.last_name or ""
+        username = f" (@{message.from_user.username})" if message.from_user.username else ""
+        sender_name = f"{first_name} {last_name}{username}".strip()
+    else:
+        sender_name = "Неизвестный отправитель"
+        
+    # Название чата
+    if message.chat:
+        if message.chat.type == "private":
+            chat_title = "Личная переписка"
+        else:
+            chat_title = message.chat.title or "Групповой чат"
+    else:
+        chat_title = "Бизнес-чат"
+        
+    return sender_name, chat_title
+
+# ==========================================
 # 1. ОБЫЧНЫЕ КОМАНДЫ И ПОИСК ПО ДАТАМ (В ЛС бота)
 # ==========================================
 
 @bot.message_handler(commands=['start', 'status'])
 def send_welcome(message):
-    # Считаем сколько всего сообщений в базе
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('SELECT COUNT(*) FROM messages')
@@ -104,22 +133,19 @@ def send_welcome(message):
     conn.close()
 
     status_text = (
-        "🟢 Бизнес-бот с вечной памятью SQLite активен!\n\n"
+        "🟢 Бизнес-бот Архивариус V3 (Автор + Чат) активен!\n\n"
         f"🗄 Всего сообщений в базе: {total_msgs}\n"
         f"👤 Твой ID: {message.from_user.id}\n"
         "📅 Для просмотра архива по датам введи команду: /history"
     )
     bot.reply_to(message, status_text)
 
-# Команда для выбора истории
 @bot.message_handler(commands=['history'])
 def show_history_menu(message):
     if message.from_user.id != MY_TELEGRAM_ID:
         return
 
-    # Создаем кнопки с быстрыми датами
     markup = types.InlineKeyboardMarkup()
-    
     today = datetime.now().strftime("%Y-%m-%d")
     yesterday = datetime.fromtimestamp(time.time() - 86400).strftime("%Y-%m-%d")
     prev_day = datetime.fromtimestamp(time.time() - 172800).strftime("%Y-%m-%d")
@@ -134,32 +160,36 @@ def show_history_menu(message):
         reply_markup=markup
     )
 
-# Обработка нажатия на кнопку даты
 @bot.callback_query_handler(func=lambda call: call.data.startswith("date_"))
 def handle_date_selection(call):
     selected_date = call.data.split("_")[1]
     messages = get_messages_by_date(selected_date)
     
     if not messages:
-        bot.answer_callback_query(call.id, "За эту дату сообщений не найдено.")
+        bot.answer_callback_query(call.id, "Пусто")
         bot.send_message(MY_TELEGRAM_ID, f"🤷‍♂️ В базе нет сохраненных сообщений за дату: {selected_date}")
         return
     
     bot.answer_callback_query(call.id, f"Загружаю {len(messages)} шт.")
     
-    report = f"📋 **Архив сообщений за {selected_date}:**\n\n"
+    report = f"📋 Архив сообщений за {selected_date}:\n\n"
     for idx, msg in enumerate(messages, 1):
-        msg_id, c_type, text = msg
+        msg_id, c_type, text, sender, chat = msg
         text_preview = text if text else f"[{c_type.upper()} файл]"
-        report += f"{idx}. ID: `{msg_id}` | Тип: *{c_type}*\n📝 Текст: {text_preview}\n\n"
+        report += (
+            f"{idx}. ID: {msg_id}\n"
+            f"👤 От кого: {sender}\n"
+            f"💬 Где: {chat}\n"
+            f"📝 Текст: {text_preview}\n"
+            f"-------------------------\n\n"
+        )
         
-        # Чтобы сообщение не превысило лимит Telegram в 4096 символов
         if len(report) > 3500:
-            bot.send_message(MY_TELEGRAM_ID, report, parse_mode="Markdown")
+            bot.send_message(MY_TELEGRAM_ID, report)
             report = ""
             
     if report:
-        bot.send_message(MY_TELEGRAM_ID, report, parse_mode="Markdown")
+        bot.send_message(MY_TELEGRAM_ID, report)
 
 # ==========================================
 # 2. ПЕРЕХВАТ И СОХРАНЕНИЕ БИЗНЕС-СООБЩЕНИЙ
@@ -168,20 +198,21 @@ def handle_date_selection(call):
 @bot.business_message_handler(content_types=['text', 'photo', 'video', 'voice', 'document', 'video_note'])
 def handle_all_business_messages(message):
     msg_id = getattr(message, 'business_message_id', None) or message.message_id
+    sender_name, chat_title = get_sender_and_chat_info(message)
     
     if message.content_type == 'text':
-        save_to_db(msg_id, 'text', text=message.text)
+        save_to_db(msg_id, 'text', text=message.text, sender_name=sender_name, chat_title=chat_title)
     elif message.content_type == 'photo':
         file_id = message.photo[-1].file_id
-        save_to_db(msg_id, 'photo', text=message.caption, file_id=file_id)
+        save_to_db(msg_id, 'photo', text=message.caption, file_id=file_id, sender_name=sender_name, chat_title=chat_title)
     elif message.content_type == 'video':
-        save_to_db(msg_id, 'video', text=message.caption, file_id=message.video.file_id)
+        save_to_db(msg_id, 'video', text=message.caption, file_id=message.video.file_id, sender_name=sender_name, chat_title=chat_title)
     elif message.content_type == 'voice':
-        save_to_db(msg_id, 'voice', file_id=message.voice.file_id)
+        save_to_db(msg_id, 'voice', file_id=message.voice.file_id, sender_name=sender_name, chat_title=chat_title)
     elif message.content_type == 'document':
-        save_to_db(msg_id, 'document', text=message.caption, file_id=message.document.file_id)
+        save_to_db(msg_id, 'document', text=message.caption, file_id=message.document.file_id, sender_name=sender_name, chat_title=chat_title)
     elif message.content_type == 'video_note':
-        save_to_db(msg_id, 'video_note', file_id=message.video_note.file_id)
+        save_to_db(msg_id, 'video_note', file_id=message.video_note.file_id, sender_name=sender_name, chat_title=chat_title)
 
 # ==========================================
 # 3. ОТСЛЕЖИВАНИЕ ИЗМЕНЕНИЙ И УДАЛЕНИЙ
@@ -190,7 +221,7 @@ def handle_all_business_messages(message):
 @bot.edited_business_message_handler(content_types=['text', 'photo', 'video', 'document'])
 def handle_edited_business_message(message):
     msg_id = getattr(message, 'business_message_id', None) or message.message_id
-    user = message.from_user.username or message.from_user.first_name
+    sender_name, chat_title = get_sender_and_chat_info(message)
     
     old_data = get_from_db(msg_id)
     old_text = old_data['text'] if old_data and old_data.get('text') else "[Нет текста в памяти]"
@@ -198,8 +229,9 @@ def handle_edited_business_message(message):
     
     if new_text and old_text != new_text:
         report = (
-            "✏️ Сообщение изменено!\n"
-            f"👤 От кого: @{user}\n"
+            "✏️ Сообщение ИЗМЕНЕНО!\n"
+            f"👤 От кого: {sender_name}\n"
+            f"💬 Где: {chat_title}\n"
             f"⬅️ Было: {old_text}\n"
             f"➡️ Стало: {new_text}"
         )
@@ -208,8 +240,14 @@ def handle_edited_business_message(message):
         except Exception as e:
             print(f"❌ Ошибка отправки изменения: {e}")
         
-        # Обновляем в базе данных
-        save_to_db(msg_id, old_data['type'] if old_data else 'text', text=new_text, file_id=old_data['file_id'] if old_data else None)
+        save_to_db(
+            msg_id, 
+            old_data['type'] if old_data else 'text', 
+            text=new_text, 
+            file_id=old_data['file_id'] if old_data else None,
+            sender_name=sender_name,
+            chat_title=chat_title
+        )
 
 @bot.deleted_business_messages_handler(func=lambda deleted_messages: True)
 def handle_deleted_business_messages(deleted_messages):
@@ -221,33 +259,59 @@ def handle_deleted_business_messages(deleted_messages):
             content_type = msg_data['type']
             file_id = msg_data['file_id']
             caption = msg_data['text'] or ""
+            sender = msg_data['sender_name']
+            chat = msg_data['chat_title']
             
+            # А. Текст
             if content_type == 'text':
-                report = f"🗑 Сообщение УДАЛЕНО!\n📝 Текст: {msg_data['text']}"
+                report = (
+                    "🗑 Сообщение УДАЛЕНО!\n"
+                    f"👤 От кого: {sender}\n"
+                    f"💬 Где: {chat}\n"
+                    f"📝 Текст: {msg_data['text']}"
+                )
                 bot.send_message(MY_TELEGRAM_ID, report)
+                
+            # Б. Фото
             elif content_type == 'photo':
-                report_caption = f"🗑 Удалено ФОТО!\n📝 Описание: {caption}"
+                report_caption = (
+                    "🗑 Удалено ФОТО!\n"
+                    f"👤 От кого: {sender}\n"
+                    f"💬 Где: {chat}\n"
+                    f"📝 Описание: {caption}"
+                )
                 try:
                     bot.send_photo(MY_TELEGRAM_ID, file_id, caption=report_caption)
                 except Exception:
-                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Удалено ФОТО (файл недоступен). Описание: {caption}")
+                    bot.send_message(MY_TELEGRAM_ID, f"{report_caption}\n⚠️ (Файл недоступен)")
+                    
+            # В. Видео
             elif content_type == 'video':
-                report_caption = f"🗑 Удалено ВИДЕО!\n📝 Описание: {caption}"
+                report_caption = (
+                    "🗑 Удалено ВИДЕО!\n"
+                    f"👤 От кого: {sender}\n"
+                    f"💬 Где: {chat}\n"
+                    f"📝 Описание: {caption}"
+                )
                 try:
                     bot.send_video(MY_TELEGRAM_ID, file_id, caption=report_caption)
                 except Exception:
-                    bot.send_message(MY_TELEGRAM_ID, report_caption)
+                    bot.send_message(MY_TELEGRAM_ID, f"{report_caption}\n⚠️ (Файл недоступен)")
+                    
+            # Г. Голосовое
             elif content_type == 'voice':
                 try:
-                    bot.send_voice(MY_TELEGRAM_ID, file_id, caption="🗑 Удалено ГОЛОСОВОЕ!")
+                    bot.send_voice(MY_TELEGRAM_ID, file_id, caption=f"🗑 Удалено ГОЛОСОВОЕ!\n👤 От: {sender}\n💬 В чате: {chat}")
                 except Exception:
-                    bot.send_message(MY_TELEGRAM_ID, "🗑 Удалено ГОЛОСОВОЕ сообщение (файл недоступен)")
+                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Удалено ГОЛОСОВОЕ!\n👤 От: {sender}\n💬 В чате: {chat}\n⚠️ (Файл недоступен)")
+                    
+            # Д. КРУГЛЯШОК (Видеосообщение)
             elif content_type == 'video_note':
                 try:
                     bot.send_video_note(MY_TELEGRAM_ID, file_id)
-                    bot.send_message(MY_TELEGRAM_ID, "🗑 Выше было удалено ВИДЕОСООБЩЕНИЕ (круглышок)!")
+                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Выше было удалено ВИДЕОСООБЩЕНИЕ (кругляшок)!\n👤 От кого: {sender}\n💬 Где: {chat}")
                 except Exception:
-                    bot.send_message(MY_TELEGRAM_ID, "🗑 Удалено ВИДЕОСООБЩЕНИЕ (кругляшок)")
+                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Удалено ВИДЕОСООБЩЕНИЕ (кругляшок)!\n👤 От кого: {sender}\n💬 Где: {chat}\n⚠️ (Файл недоступен)")
         else:
             print(f"⚠️ Сообщение {msg_id} удалено, но его данных нет в SQLite")
 
