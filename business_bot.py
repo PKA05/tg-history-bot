@@ -13,6 +13,9 @@ telebot.logger.setLevel(logging.INFO)
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = TeleBot(TOKEN)
 
+# ТВОЙ ЛИЧНЫЙ TELEGRAM ID (Бот будет слать отчеты сюда)
+MY_TELEGRAM_ID = 1551104336
+
 # База данных сообщений в памяти
 messages_db = {}
 
@@ -28,7 +31,6 @@ def send_welcome(message):
         f"👤 Твой ID: {message.from_user.id}\n"
         "📡 Запущен из файла: business_bot.py"
     )
-    # Убрали parse_mode, чтобы не было ошибок разметки
     bot.reply_to(message, status_text)
 
 @bot.message_handler(func=lambda message: message.chat.type == "private")
@@ -45,7 +47,7 @@ def handle_business_message(message):
     if message.text:
         msg_id = getattr(message, 'business_message_id', message.message_id)
         messages_db[msg_id] = message.text
-        print(f"📥 [Бизнес] Сохранено: {message.text}")
+        print(f"📥 [Бизнес] Сохранено в память (ID: {msg_id}): {message.text}")
 
 # Отслеживаем изменения
 @bot.edited_business_message_handler(func=lambda message: True)
@@ -64,15 +66,18 @@ def handle_edited_business_message(message):
             f"➡️ Стало: {new_text}"
         )
         try:
-            bot.send_message(message.business_connection_id, report)
+            # Отправляем отчет напрямую тебе в ЛС
+            bot.send_message(MY_TELEGRAM_ID, report)
+            print(f"✅ Отчет об изменении отправлен пользователю {MY_TELEGRAM_ID}")
         except Exception as e:
-            print(f"❌ Ошибка отправки изменения: {e}")
+            print(f"❌ Ошибка отправки изменения в ЛС: {e}")
         messages_db[msg_id] = new_text
 
 # Отслеживаем удаления
 @bot.deleted_business_messages_handler(func=lambda deleted_messages: True)
 def handle_deleted_business_messages(deleted_messages):
     msg_ids = getattr(deleted_messages, 'message_ids', [])
+    print(f"🗑 [Бизнес] Telegram сообщил об удалении ID: {msg_ids}")
     
     for msg_id in msg_ids:
         if msg_id in messages_db:
@@ -82,10 +87,11 @@ def handle_deleted_business_messages(deleted_messages):
                 f"📝 Текст: {deleted_text}"
             )
             try:
-                bot.send_message(deleted_messages.business_connection_id, report)
-                print(f"✅ Отчет об удалении отправлен!")
+                # Отправляем отчет напрямую тебе в ЛС
+                bot.send_message(MY_TELEGRAM_ID, report)
+                print(f"✅ Отчет об удалении отправлен пользователю {MY_TELEGRAM_ID}")
             except Exception as e:
-                print(f"❌ Ошибка отправки удаления: {e}")
+                print(f"❌ Ошибка отправки удаления в ЛС: {e}")
             messages_db.pop(msg_id)
 
 # ==========================================
