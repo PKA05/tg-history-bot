@@ -1,8 +1,7 @@
 import os
 import time
 import threading
-import telebot
-from telebot import TeleBot
+from telebot import TeleBot, types
 from flask import Flask
 
 # Включаем логирование в консоль Render
@@ -13,10 +12,16 @@ telebot.logger.setLevel(logging.INFO)
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = TeleBot(TOKEN)
 
-# ТВОЙ ЛИЧНЫЙ TELEGRAM ID (Бот будет слать отчеты сюда)
+# ТВОЙ ЛИЧНЫЙ TELEGRAM ID
 MY_TELEGRAM_ID = 1551104336
 
-# База данных сообщений в памяти
+# Директория для временного сохранения медиафайлов
+DOWNLOAD_DIR = "downloads"
+if not os.path.exists(DOWNLOAD_DIR):
+    os.makedirs(DOWNLOAD_DIR)
+
+# База данных сообщений в памяти (ID -> Данные)
+# Храним структуру: {msg_id: {'type': 'text/photo...', 'text': '...', 'file_id': '...'}}
 messages_db = {}
 
 # ==========================================
@@ -26,7 +31,7 @@ messages_db = {}
 @bot.message_handler(commands=['start', 'status'])
 def send_welcome(message):
     status_text = (
-        "🟢 Новый бизнес-бот успешно работает!\n\n"
+        "🟢 Новый бизнес-бот (МЕДИА-ВЕРСИЯ) успешно работает!\n\n"
         f"📦 Сообщений в памяти: {len(messages_db)}\n"
         f"👤 Твой ID: {message.from_user.id}\n"
         "📡 Запущен из файла: business_bot.py"
@@ -38,71 +43,107 @@ def echo_all(message):
     bot.reply_to(message, f"Получил сообщение в ЛС: '{message.text}'")
 
 # ==========================================
-# 2. ФУНКЦИИ TELEGRAM BUSINESS
+# 2. УЛУЧШЕННОЕ ХРАНЕНИЕ МЕДИА (Новые типы!)
 # ==========================================
 
-# Сохраняем новые сообщения
-@bot.business_message_handler(func=lambda message: True)
-def handle_business_message(message):
-    if message.text:
-        msg_id = getattr(message, 'business_message_id', message.message_id)
-        messages_db[msg_id] = message.text
-        print(f"📥 [Бизнес] Сохранено в память (ID: {msg_id}): {message.text}")
-
-# Отслеживаем изменения
-@bot.edited_business_message_handler(func=lambda message: True)
-def handle_edited_business_message(message):
-    msg_id = getattr(message, 'business_message_id', message.message_id)
-    user = message.from_user.username or message.from_user.first_name
+def save_message_to_db(msg_id, content_type, text=None, file_id=None):
+    """Универсальная функция сохранения данных в память"""
+    if text or file_id:
+        messages_db[msg_id] = {
+            'type': content_type,
+            'text': text,
+            'file_id': file_id,
+            'time': time.time() # Время сохранения для очистки
+        }
+        print(f"📥 [Бизнес] Успешно сохранено ({content_type}) {msg_id}: '{text or '[Медиа]'}'")
     
-    old_text = messages_db.get(msg_id, "[Нет данных в памяти]")
-    new_text = message.text
+# Ловим все типы контента: текст, фото, видео, голосовые, документы
+@bot.business_message_handler(content_types=['text', 'photo', 'video', 'voice', 'document'])
+def handle_all_business_messages(message):
+    msg_id = getattr(message, 'business_message_id', None) or message.message_id
+    
+    # 1. Если это текст
+    if message.content_type == 'text':
+        save_message_to_db(msg_id, 'text', text=message.text)
+        
+    # 2. Если это фото
+    elif message.content_type == 'photo':
+        # Telegram присылает несколько размеров, берем самый большой (последний в списке)
+        file_id = message.photo[-1].file_id
+        save_message_to_db(msg_id, 'photo', text=message.caption, file_id=file_id)
+        
+    # 3. Если это видео
+    elif message.content_type == 'video':
+        save_message_to_db(msg_id, 'video', text=message.caption, file_id=message.video.file_id)
+        
+    # 4. Если это голосовое
+    elif message.content_type == 'voice':
+        save_message_to_db(msg_id, 'voice', file_id=message.voice.file_id)
+        
+    # 5. Если это документ
+    elif message.content_type == 'document':
+        save_message_to_db(msg_id, 'document', text=message.caption, file_id=message.document.file_id)
 
-    if old_text != new_text:
-        report = (
-            "✏️ Сообщение изменено!\n"
-            f"👤 От кого: @{user}\n"
-            f"⬅️ Было: {old_text}\n"
-            f"➡️ Стало: {new_text}"
-        )
-        try:
-            # Отправляем отчет напрямую тебе в ЛС
-            bot.send_message(MY_TELEGRAM_ID, report)
-            print(f"✅ Отчет об изменении отправлен пользователю {MY_TELEGRAM_ID}")
-        except Exception as e:
-            print(f"❌ Ошибка отправки изменения в ЛС: {e}")
-        messages_db[msg_id] = new_text
+# ==========================================
+# 3. УЛУЧШЕННОЕ УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ
+# ==========================================
 
-# Отслеживаем удаления
 @bot.deleted_business_messages_handler(func=lambda deleted_messages: True)
 def handle_deleted_business_messages(deleted_messages):
     msg_ids = getattr(deleted_messages, 'message_ids', [])
-    print(f"🗑 [Бизнес] Telegram сообщил об удалении ID: {msg_ids}")
+    print(f"🗑 [Бизнес] Событие удаления сообщений: {msg_ids}")
     
     for msg_id in msg_ids:
         if msg_id in messages_db:
-            deleted_text = messages_db[msg_id]
-            report = (
-                "🗑 Сообщение УДАЛЕНО!\n"
-                f"📝 Текст: {deleted_text}"
-            )
-            try:
-                # Отправляем отчет напрямую тебе в ЛС
+            msg_data = messages_db[msg_id]
+            content_type = msg_data['type']
+            file_id = msg_data['file_id']
+            caption = msg_data['text'] or ""
+            
+            # А. Если удалили ТЕКСТ
+            if content_type == 'text':
+                report = f"🗑 Сообщение УДАЛЕНО!\n📝 Текст: {msg_data['text']}"
                 bot.send_message(MY_TELEGRAM_ID, report)
-                print(f"✅ Отчет об удалении отправлен пользователю {MY_TELEGRAM_ID}")
-            except Exception as e:
-                print(f"❌ Ошибка отправки удаления в ЛС: {e}")
+                
+            # Б. Если удалили ФОТО
+            elif content_type == 'photo':
+                # Сначала присылаем фото
+                report_caption = f"🗑 Удалено ФОТО!\n📝 Описание: {caption}"
+                try:
+                    bot.send_photo(MY_TELEGRAM_ID, file_id, caption=report_caption)
+                    print(f"✅ Удаленное фото {msg_id} переслано в ЛС!")
+                except Exception as e:
+                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Удалено ФОТО, но не удалось переслать файл: {e}\n📝 Описание: {caption}")
+                    
+            # В. Если удалили ВИДЕО
+            elif content_type == 'video':
+                report_caption = f"🗑 Удалено ВИДЕО!\n📝 Описание: {caption}"
+                try:
+                    bot.send_video(MY_TELEGRAM_ID, file_id, caption=report_caption)
+                except Exception:
+                    bot.send_message(MY_TELEGRAM_ID, report_caption)
+
+            # Г. Если удалили ГОЛОСОВОЕ
+            elif content_type == 'voice':
+                try:
+                    bot.send_voice(MY_TELEGRAM_ID, file_id, caption="🗑 Удалено ГОЛОСОВОЕ!")
+                except Exception:
+                    bot.send_message(MY_TELEGRAM_ID, "🗑 Удалено ГОЛОСОВОЕ сообщение (файл недоступен)")
+
+            # Удаляем из памяти, чтобы не засорять
             messages_db.pop(msg_id)
+        else:
+            print(f"⚠️ Сообщение {msg_id} удалено, но его данных не было в нашей памяти")
 
 # ==========================================
-# 3. ВЕБ-СЕРВЕР И СТАРТ
+# 4. ВЕБ-СЕРВЕР И СТАРТ
 # ==========================================
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Бизнес-бот активен"
+    return "Медиа-бот Архивариус активен"
 
 def start_polling():
     while True:
