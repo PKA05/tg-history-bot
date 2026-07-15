@@ -31,7 +31,7 @@ messages_db = {}
 @bot.message_handler(commands=['start', 'status'])
 def send_welcome(message):
     status_text = (
-        "🟢 Бизнес-бот (Стабильная медиа-версия) успешно работает!\n\n"
+        "🟢 Бизнес-бот (ПОЛНАЯ МЕДИА-ВЕРСИЯ) успешно работает!\n\n"
         f"📦 Сообщений в памяти: {len(messages_db)}\n"
         f"👤 Твой ID: {message.from_user.id}\n"
         "📡 Запущен из файла: business_bot.py"
@@ -43,7 +43,7 @@ def echo_all(message):
     bot.reply_to(message, f"Получил сообщение в ЛС: '{message.text}'")
 
 # ==========================================
-# 2. ХРАНЕНИЕ МЕДИА И ТЕКСТА
+# 2. УЛУЧШЕННОЕ ХРАНЕНИЕ ВСЕХ ТИПОВ МЕДИА
 # ==========================================
 
 def save_message_to_db(msg_id, content_type, text=None, file_id=None):
@@ -57,31 +57,35 @@ def save_message_to_db(msg_id, content_type, text=None, file_id=None):
         }
         print(f"📥 [Бизнес] Сохранено ({content_type}) {msg_id}: '{text or '[Медиа]'}'")
     
-# Ловим все типы контента: текст, фото, видео, голосовые, документы
-@bot.business_message_handler(content_types=['text', 'photo', 'video', 'voice', 'document'])
+# Ловим все типы контента, включая кругляшки (video_note)
+@bot.business_message_handler(content_types=['text', 'photo', 'video', 'voice', 'document', 'video_note'])
 def handle_all_business_messages(message):
     msg_id = getattr(message, 'business_message_id', None) or message.message_id
     
-    # 1. Если это текст
+    # 1. Текст
     if message.content_type == 'text':
         save_message_to_db(msg_id, 'text', text=message.text)
         
-    # 2. Если это фото
+    # 2. Фото
     elif message.content_type == 'photo':
         file_id = message.photo[-1].file_id
         save_message_to_db(msg_id, 'photo', text=message.caption, file_id=file_id)
         
-    # 3. Если это видео
+    # 3. Видео
     elif message.content_type == 'video':
         save_message_to_db(msg_id, 'video', text=message.caption, file_id=message.video.file_id)
         
-    # 4. Если это голосовое
+    # 4. Голосовое
     elif message.content_type == 'voice':
         save_message_to_db(msg_id, 'voice', file_id=message.voice.file_id)
         
-    # 5. Если это документ
+    # 5. Документ
     elif message.content_type == 'document':
         save_message_to_db(msg_id, 'document', text=message.caption, file_id=message.document.file_id)
+
+    # 6. КРУГЛЯШОК (Видеосообщение)
+    elif message.content_type == 'video_note':
+        save_message_to_db(msg_id, 'video_note', file_id=message.video_note.file_id)
 
 # ==========================================
 # 3. ОТСЛЕЖИВАНИЕ ИЗМЕНЕНИЙ И УДАЛЕНИЙ
@@ -93,11 +97,9 @@ def handle_edited_business_message(message):
     msg_id = getattr(message, 'business_message_id', None) or message.message_id
     user = message.from_user.username or message.from_user.first_name
     
-    # Ищем старые данные
     old_data = messages_db.get(msg_id)
     old_text = old_data['text'] if old_data and old_data.get('text') else "[Нет текста в памяти]"
     
-    # Получаем измененный текст (или подпись под медиафайлом)
     new_text = message.text or message.caption
     
     if new_text and old_text != new_text:
@@ -108,13 +110,11 @@ def handle_edited_business_message(message):
             f"➡️ Стало: {new_text}"
         )
         try:
-            # Отправляем БЕЗ parse_mode, чтобы спецсимволы не ломали бота
             bot.send_message(MY_TELEGRAM_ID, report)
             print(f"✅ Отчет об изменении {msg_id} отправлен!")
         except Exception as e:
             print(f"❌ Ошибка отправки изменения: {e}")
         
-        # Обновляем в памяти
         if msg_id in messages_db:
             messages_db[msg_id]['text'] = new_text
         else:
@@ -163,6 +163,16 @@ def handle_deleted_business_messages(deleted_messages):
                     bot.send_voice(MY_TELEGRAM_ID, file_id, caption="🗑 Удалено ГОЛОСОВОЕ!")
                 except Exception:
                     bot.send_message(MY_TELEGRAM_ID, "🗑 Удалено ГОЛОСОВОЕ сообщение (файл недоступен)")
+
+            # Д. КРУГЛЯШОК (Видеосообщение)
+            elif content_type == 'video_note':
+                try:
+                    bot.send_video_note(MY_TELEGRAM_ID, file_id)
+                    # Отправляем текстовое пояснение следом, так как к кругляшкам нельзя крепить текст напрямую
+                    bot.send_message(MY_TELEGRAM_ID, "🗑 Выше было удалено ВИДЕОСООБЩЕНИЕ (круглышок)!")
+                    print(f"✅ Удаленный кругляшок {msg_id} переслан в ЛС!")
+                except Exception as e:
+                    bot.send_message(MY_TELEGRAM_ID, f"🗑 Удалено ВИДЕОСООБЩЕНИЕ (кругляшок), но не удалось отправить файл: {e}")
 
             messages_db.pop(msg_id)
         else:
