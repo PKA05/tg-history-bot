@@ -1,6 +1,7 @@
 import os
 import time
 import threading
+import telebot  # Исправили импорт, теперь ошибок не будет!
 from telebot import TeleBot, types
 from flask import Flask
 
@@ -21,7 +22,6 @@ if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
 # База данных сообщений в памяти (ID -> Данные)
-# Храним структуру: {msg_id: {'type': 'text/photo...', 'text': '...', 'file_id': '...'}}
 messages_db = {}
 
 # ==========================================
@@ -43,7 +43,7 @@ def echo_all(message):
     bot.reply_to(message, f"Получил сообщение в ЛС: '{message.text}'")
 
 # ==========================================
-# 2. УЛУЧШЕННОЕ ХРАНЕНИЕ МЕДИА (Новые типы!)
+# 2. УЛУЧШЕННОЕ ХРАНЕНИЕ МЕДИА
 # ==========================================
 
 def save_message_to_db(msg_id, content_type, text=None, file_id=None):
@@ -53,7 +53,7 @@ def save_message_to_db(msg_id, content_type, text=None, file_id=None):
             'type': content_type,
             'text': text,
             'file_id': file_id,
-            'time': time.time() # Время сохранения для очистки
+            'time': time.time()
         }
         print(f"📥 [Бизнес] Успешно сохранено ({content_type}) {msg_id}: '{text or '[Медиа]'}'")
     
@@ -68,7 +68,6 @@ def handle_all_business_messages(message):
         
     # 2. Если это фото
     elif message.content_type == 'photo':
-        # Telegram присылает несколько размеров, берем самый большой (последний в списке)
         file_id = message.photo[-1].file_id
         save_message_to_db(msg_id, 'photo', text=message.caption, file_id=file_id)
         
@@ -107,7 +106,6 @@ def handle_deleted_business_messages(deleted_messages):
                 
             # Б. Если удалили ФОТО
             elif content_type == 'photo':
-                # Сначала присылаем фото
                 report_caption = f"🗑 Удалено ФОТО!\n📝 Описание: {caption}"
                 try:
                     bot.send_photo(MY_TELEGRAM_ID, file_id, caption=report_caption)
@@ -130,7 +128,7 @@ def handle_deleted_business_messages(deleted_messages):
                 except Exception:
                     bot.send_message(MY_TELEGRAM_ID, "🗑 Удалено ГОЛОСОВОЕ сообщение (файл недоступен)")
 
-            # Удаляем из памяти, чтобы не засорять
+            # Удаляем из памяти
             messages_db.pop(msg_id)
         else:
             print(f"⚠️ Сообщение {msg_id} удалено, но его данных не было в нашей памяти")
