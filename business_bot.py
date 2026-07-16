@@ -143,7 +143,7 @@ def send_welcome(message):
     conn.close()
 
     status_text = (
-        "🟢 Бизнес-бот Архивариус V3.1 (UTC+5 Ташкент) активен!\n\n"
+        "🟢 Бизнес-бот Архивариус V3.2 (UTC+5 Ташкент) активен!\n\n"
         f"🗄 Всего сообщений в базе: {total_msgs}\n"
         f"👤 Твой ID: {message.from_user.id}\n"
         "📅 Для просмотра архива по датам введи команду: /history"
