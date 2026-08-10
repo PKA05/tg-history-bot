@@ -6,7 +6,7 @@ import random
 import telebot
 from telebot import TeleBot, types
 from flask import Flask
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 # Включаем logging
 import logging
@@ -25,7 +25,7 @@ DB_FILE = "messages.db"
 # ТОЧНОЕ ОПРЕДЕЛЕНИЕ ВРЕМЕНИ И ДАТЫ ПО ТАШКЕНТУ (UTC+5)
 # ==========================================
 def get_tashkent_now():
-    return datetime.utcnow() + timedelta(hours=5)
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=5)
 
 def get_tashkent_date(days_offset=0):
     tashkent_now = get_tashkent_now()
@@ -85,7 +85,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    print("✅ [DB] База данных успешно инициализирована со всеми функциями!")
+    print("✅ [DB] База данных успешно инициализирована!")
 
 init_db()
 
@@ -108,9 +108,9 @@ def save_to_db(msg_id, content_type, text=None, file_id=None, sender_name="Не�
         conn.close()
         
         emotion = analyze_emotion(text)
-        print(f"!!! СРАБОТАЛО СОХРАНЕНИЕ !!! 💾 Эмоция: {emotion} | От {sender_name}")
+        print(f"💾 Эмоция: {emotion} | От {sender_name}")
     except Exception as e:
-        print(f"❌ [DB] Критическая ошибка сохранения: {e}")
+        print(f"❌ [DB] Ошибка сохранения: {e}")
 
 def get_from_db(msg_id):
     try:
@@ -209,13 +209,13 @@ def send_welcome(message):
         return
         
     status_text = (
-        "🟢 **Архивариус V4.1 Любовный Аналитик (Ташкент UTC+5)**\n\n"
+        "🟢 **Архивариус V4.1 (Ташкент UTC+5)**\n\n"
         "📜 **Доступные команды:**\n"
         "📅 /history — Посмотреть архив по дням\n"
         "📊 /stats — Статистика базы и преобладающих эмоций\n"
         "🔍 /search <текст> — Быстрый поиск сообщений\n"
         "🔮 /astro <имя> — Сканер любовной совместимости и верности\n"
-        "🗑 /clear_my_history — Полное сбрасывание и очистка базы\n"
+        "🗑 /clear_my_history — Сброс и чистка базы данных\n"
     )
     bot.reply_to(message, status_text, parse_mode="Markdown")
 
@@ -226,7 +226,7 @@ def love_astro_command(message):
         
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        bot.reply_to(message, "⚠️ Напиши имя или юзернейм человека после команды. Пример: `/astro Анна`", parse_mode="Markdown")
+        bot.reply_to(message, "⚠️ Напиши имя человека после команды. Пример: `/astro Анна`", parse_mode="Markdown")
         return
         
     target_name = args[1]
@@ -303,9 +303,6 @@ def search_messages(message):
     except Exception as e:
         bot.send_message(MY_TELEGRAM_ID, f"❌ Ошибка поиска: {e}")
 
-# ==========================================
-# ЖЁСТКАЯ ОЧИСТКА И ПЕРЕСОЗДАНИЕ БАЗЫ
-# ==========================================
 @bot.message_handler(commands=['clear_my_history'])
 def clear_history_db(message):
     if message.from_user.id != MY_TELEGRAM_ID:
@@ -319,7 +316,7 @@ def clear_history_db(message):
         
         init_db()
         
-        bot.send_message(MY_TELEGRAM_ID, "🗑 **База данных полностью уничтожена и пересоздана с нуля! История абсолютно чиста.**", parse_mode="Markdown")
+        bot.send_message(MY_TELEGRAM_ID, "🗑 **База данных полностью уничтожена и пересоздана с нуля! История чиста.**", parse_mode="Markdown")
     except Exception as e:
         bot.send_message(MY_TELEGRAM_ID, f"❌ Ошибка при очистке базы: {e}")
 
@@ -474,7 +471,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Любовный Архивариус V4.1 активен"
+    return "Архивариус V4.1 активен"
 
 def start_polling():
     while True:
