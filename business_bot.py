@@ -226,75 +226,110 @@ def admin_stats(message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(DISTINCT user_id) FROM connections')
-    users_count = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM messages')
-    msg_count = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT user_id, user_name FROM connections GROUP BY user_id')
-    users_list = cursor.fetchall()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT COUNT(DISTINCT user_id) FROM connections')
+        users_count = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT COUNT(*) FROM messages')
+        msg_count = cursor.fetchone()[0] or 0
+        
+        cursor.execute('SELECT DISTINCT user_id, user_name FROM connections')
+        users_list = cursor.fetchall()
+        conn.close()
 
-    text = f"📊 **СТАТИСТИКА БОТА:**\n\n"
-    text += f"👥 Всего пользователей Business: **{users_count}**\n"
-    text += f"💾 Всего сохраненных сообщений: **{msg_count}**\n\n"
-    text += "📋 **Список пользователей:**\n"
-    
-    for u in users_list:
-        text += f"• {u[1]} (ID: `{u[0]}`)\n"
+        text = f"📊 **СТАТИСТИКА БОТА:**\n\n"
+        text += f"👥 Всего пользователей Business: **{users_count}**\n"
+        text += f"💾 Всего сохраненных сообщений: **{msg_count}**\n\n"
+        text += "📋 **Список пользователей:**\n"
+        
+        if users_list:
+            for u in users_list:
+                name = u[1] if u[1] else "Без имени"
+                text += f"• {name} (ID: `{u[0]}`)\n"
+        else:
+            text += "Пока нет подключенных пользователей.\n"
 
-    bot.reply_to(message, text, parse_mode="Markdown")
+        bot.reply_to(message, text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"❌ [Stats Error]: {e}")
+        bot.reply_to(message, f"❌ Ошибка при получении статистики: {e}")
 
 @bot.message_handler(commands=['history'])
 def admin_history(message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT chat_id, sender_name, chat_title, COUNT(*) FROM messages GROUP BY chat_id')
-    chats = cursor.fetchall()
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT chat_id, 
+                   COALESCE(chat_title, sender_name, 'Неизвестный чат') as display_name, 
+                   COUNT(*) 
+            FROM messages 
+            GROUP BY chat_id
+            ORDER BY timestamp DESC
+            LIMIT 20
+        ''')
+        chats = cursor.fetchall()
+        conn.close()
 
-    if not chats:
-        bot.reply_to(message, "📭 В базе пока нет сохраненных сообщений.")
-        return
+        if not chats:
+            bot.reply_to(message, "📭 В базе пока нет сохраненных сообщений.")
+            return
 
-    markup = types.InlineKeyboardMarkup()
-    for c in chats:
-        chat_id, sender, title, count = c
-        btn_text = f"👤 {title} ({count} сообщ.)"
-        markup.add(types.InlineKeyboardButton(text=btn_text, callback_data=f"hist_{chat_id}"))
+        markup = types.InlineKeyboardMarkup()
+        for c in chats:
+            chat_id, display_name, count = c
+            short_name = (display_name[:25] + '..') if len(display_name) > 25 else display_name
+            btn_text = f"👤 {short_name} ({count} сообщ.)"
+            markup.add(types.InlineKeyboardButton(text=btn_text, callback_data=f"hist_{chat_id}"))
 
-    bot.reply_to(message, "📂 **Выберите чат из базы данных для просмотра:**", reply_markup=markup)
+        bot.reply_to(message, "📂 **Выберите чат из базы данных для просмотра:**", reply_markup=markup)
+    except Exception as e:
+        print(f"❌ [History Error]: {e}")
+        bot.reply_to(message, f"❌ Ошибка при получении истории: {e}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('hist_'))
 def callback_history_chat(call):
     if call.from_user.id != ADMIN_ID:
         return
 
-    chat_id = int(call.data.split('_')[1])
-    
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT sender_name, content_type, text, timestamp FROM messages WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 10', (chat_id,))
-    msgs = cursor.fetchall()
-    conn.close()
+    try:
+        chat_id = int(call.data.split('_')[1])
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT COALESCE(sender_name, 'Неизвестный'), content_type, text, timestamp 
+            FROM messages 
+            WHERE chat_id = ? 
+            ORDER BY timestamp DESC 
+            LIMIT 15
+        ''', (chat_id,))
+        msgs = cursor.fetchall()
+        conn.close()
 
-    if not msgs:
-        bot.answer_callback_query(call.id, "Сообщений не найдено.")
-        return
+        if not msgs:
+            bot.answer_callback_query(call.id, "Сообщений не найдено.")
+            return
 
-    text = f"📜 **Последние 10 сообщений чата (`{chat_id}`):**\n\n"
-    for m in reversed(msgs):
-        sender, c_type, msg_text, ts = m
-        dt = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
-        text += f"[{dt}] **{sender}** ({c_type}): {msg_text or '[Медиафайл]'}\n"
+        text = f"📜 **Последние сообщения чата (`{chat_id}`):**\n\n"
+        for m in reversed(msgs):
+            sender, c_type, msg_text, ts = m
+            dt = datetime.fromtimestamp(ts).strftime('%H:%M:%S') if ts else "--:--:--"
+            content = msg_text if msg_text else f"[{c_type}]"
+            text += f"[{dt}] **{sender}**: {content}\n"
 
-    bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
+        bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        print(f"❌ [Callback Error]: {e}")
+        bot.answer_callback_query(call.id, "Ошибка при загрузке истории.")
 
 # ==========================================
 # ПЕРЕХВАТ БИЗНЕС-СООБЩЕНИЙ
@@ -408,7 +443,6 @@ def home():
     return "Публичный Сервис Архивации Работает"
 
 def start_polling():
-    # Настраиваем меню команд при запуске
     setup_bot_commands()
     
     while True:
