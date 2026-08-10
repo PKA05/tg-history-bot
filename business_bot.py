@@ -43,7 +43,7 @@ def init_db():
         )
     ''')
     
-    # Таблица правки и удалений
+    # Таблица правок сообщений
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS message_edits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,7 +142,7 @@ def handle_business_message_edit(message: types.Message):
     ''', (message.message_id, message.chat.id))
     row = cursor.fetchone()
     
-    old_text = row[0] if row else "[Текст не найден в базах]"
+    old_text = row[0] if row else "[Текст не найден в базе]"
     new_text = message.text or message.caption or ""
     
     cursor.execute('''
@@ -241,15 +241,17 @@ def admin_stats(message):
         
         if users_list:
             for u in users_list:
-                name = telebot.formatting.escape_html(u[1]) if u[1] else "Без имени"
-                text += f"• {name} (ID: <code>{u[0]}</code>)\n"
+                raw_name = u[1] if u[1] else "Без имени"
+                safe_name = telebot.formatting.escape_html(raw_name)
+                text += f"• {safe_name} (ID: <code>{u[0]}</code>)\n"
         else:
             text += "Пока нет подключенных пользователей.\n"
 
         bot.reply_to(message, text, parse_mode="HTML")
     except Exception as e:
         print(f"❌ [Stats Error]: {e}")
-        bot.reply_to(message, f"❌ Ошибка при получении статистики: {telebot.formatting.escape_html(str(e))}", parse_mode="HTML")
+        safe_error = telebot.formatting.escape_html(str(e))
+        bot.reply_to(message, f"❌ Ошибка при получении статистики: {safe_error}", parse_mode="HTML")
 
 @bot.message_handler(commands=['history'])
 def admin_history(message):
@@ -286,7 +288,8 @@ def admin_history(message):
         bot.reply_to(message, "📂 <b>Выберите чат из базы данных для просмотра:</b>", reply_markup=markup, parse_mode="HTML")
     except Exception as e:
         print(f"❌ [History Error]: {e}")
-        bot.reply_to(message, f"❌ Ошибка при получении истории: {telebot.formatting.escape_html(str(e))}", parse_mode="HTML")
+        safe_error = telebot.formatting.escape_html(str(e))
+        bot.reply_to(message, f"❌ Ошибка при получении истории: {safe_error}", parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('hist_'))
 def callback_history_chat(call):
@@ -316,7 +319,9 @@ def callback_history_chat(call):
         for m in reversed(msgs):
             sender = telebot.formatting.escape_html(m[0])
             c_type = m[1]
-            msg_text = telebot.formatting.escape_html(m[2]) if m[2] else f"[{c_type}]"
+            raw_text = m[2] if m[2] else f"[{c_type}]"
+            msg_text = telebot.formatting.escape_html(raw_text)
+            
             ts = m[3]
             dt = datetime.fromtimestamp(ts).strftime('%H:%M:%S') if ts else "--:--:--"
             text += f"[{dt}] <b>{sender}</b>: {msg_text}\n"
@@ -332,4 +337,12 @@ def callback_history_chat(call):
 # ==========================================
 if __name__ == "__main__":
     print("🚀 Бот запущен и ожидает событий...")
-    bot.infinity_polling(allowed_updates=["message", "edited_message", "business_connection", "business_message", "edited_business_message", "deleted_business_message", "callback_query"])
+    bot.infinity_polling(allowed_updates=[
+        "message", 
+        "edited_message", 
+        "business_connection", 
+        "business_message", 
+        "edited_business_message", 
+        "deleted_business_message", 
+        "callback_query"
+    ])
