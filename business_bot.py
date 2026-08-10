@@ -5,14 +5,21 @@ import sqlite3
 import telebot
 from telebot import TeleBot, types
 from flask import Flask
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 # ==========================================
-# НАСТРОЙКИ
+# НАСТРОЙКИ (БЕЗОПАСНЫЕ ПЕРЕМЕННЫЕ)
 # ==========================================
-BOT_TOKEN = "8944549764:AAGnsYZaXIV6JsC-OC34d76AAy_vJElxEts"
-ADMIN_ID = 1551104336
+# На Render в разделе Environment добавьте:
+# BOT_TOKEN = ваш_новый_токен_из_BotFather
+# ADMIN_ID = 1551104336
+
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "1551104336"))
 DB_FILE = "messages.db"
+
+if not BOT_TOKEN:
+    print("❌ ОШИБКА: Переменная BOT_TOKEN не найдена в Environment Variables!")
 
 bot = TeleBot(BOT_TOKEN)
 
