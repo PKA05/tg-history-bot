@@ -107,7 +107,6 @@ def save_to_db(msg_id, content_type, text=None, file_id=None, sender_name="Не�
         conn.commit()
         conn.close()
         
-        # Вывод анализа в консоль сервера
         emotion = analyze_emotion(text)
         print(f"!!! СРАБОТАЛО СОХРАНЕНИЕ !!! 💾 Эмоция: {emotion} | От {sender_name}")
     except Exception as e:
@@ -168,29 +167,30 @@ def get_sender_and_chat_info(message):
 # ЛЮБОВНЫЙ АСТРОЛОГИЧЕСКИЙ ДВИЖОК
 # ==========================================
 def generate_love_astro(name):
-    # Генератор предсказания на основе букв имени, чтобы для одного имени результат в этот день был стабильным
-    random.seed(len(name) + int(time.strftime("%d%m%Y")))
-    
-    loyalty = random.randint(40, 100)  # Уровень верности
-    secrets_level = random.randint(10, 95)  # Уровень скрытности
-    passion = random.randint(50, 100)  # Страсть
+    loyalty = random.randint(45, 100)  
+    secrets_level = random.randint(5, 90)  
+    passion = random.randint(55, 100)  
+    compatibility = random.randint(60, 99)
     
     status_list = [
         "🌌 Звезды говорят: этот человек сейчас проживает глубокие внутренние трансформации. В мыслях преобладает сильная привязанность, но есть страх открыться полностью.",
-        "✨ Луна в Скорпионе предупреждает: между вами кипит мощная эмоциональная связь, но собеседник склонен утаивать мелкие детали, чтобы казаться загадочнее.",
-        "🔮 Венера в Раке указывает на невероятную нежность и потребность в защите. Этот человек ищет стабильности и преданности, флирт на стороне его сейчас не интересует.",
-        "🪐 Аспект Меркурия намекает: прямо сейчас человек может искусно лавировать между правдой и фантазией. Доверяй, но обращай внимание на интуицию."
+        "✨ Луна предупреждает: между вами кипит мощная эмоциональная связь, но собеседник склонен утаивать мелкие детали, чтобы казаться загадочнее.",
+        "🔮 Венера указывает на невероятную нежность и потребность в защите. Этот человек ищет стабильности и преданности, флирт на стороне его сейчас не интересует.",
+        "🪐 Аспект Меркурия намекает: прямо сейчас человек может искусно лавировать между правдой и фантазией. Доверяй, но обращай внимание на интуицию.",
+        "🌟 Солнечное влияние раскрывает сильное влечение к тебе. Человек часто перечитывает ваши диалоги, даже если внешне старается выглядеть хладнокровно и занято.",
+        "🔮 Тёмная сторона Луны шепчет о легкой ревности со стороны этого человека. Он хочет контролировать внимание вокруг тебя, но боится признаться в этом вслух."
     ]
     
     advice_list = [
         "Следи за резкими изменениями в стиле общения — за ними обычно прячутся скрытые эмоции.",
         "Лучший способ узнать правду — поговорить по душам в тихой, уютной обстановке без лишних свидетелей.",
-        "Прямо сейчас звёзды советуют проявить чуть больше тепла, это растопит любую скрытность."
+        "Прямо сейчас звёзды советуют проявить чуть больше тепла, это растопит любую скрытность.",
+        "Не дави вопросами прямо сейчас. Позволь человеку самому раскрыть свои карты ближе к вечеру."
     ]
     
     astro_text = (
         f"🔮 **ЛЮБОВНЫЙ КОСМИЧЕСКИЙ СКАНЕР ДЛЯ: {name}**\n\n"
-        f"❤️ **Любовная совместимость:** `{random.randint(65, 99)}%`\n"
+        f"❤️ **Любовная совместимость:** `{compatibility}%`\n"
         f"💎 **Уровень верности & преданности:** `{loyalty}%`\n"
         f"🤫 **Склонность скрывать мысли:** `{secrets_level}%`\n"
         f"🔥 **Градус страсти в отношениях:** `{passion}%`\n\n"
@@ -209,13 +209,13 @@ def send_welcome(message):
         return
         
     status_text = (
-        "🟢 **Архивариус V4.0 Любовный Аналитик (Ташкент UTC+5)**\n\n"
+        "🟢 **Архивариус V4.1 Любовный Аналитик (Ташкент UTC+5)**\n\n"
         "📜 **Доступные команды:**\n"
         "📅 /history — Посмотреть архив по дням\n"
         "📊 /stats — Статистика базы и преобладающих эмоций\n"
         "🔍 /search <текст> — Быстрый поиск сообщений\n"
         "🔮 /astro <имя> — Сканер любовной совместимости и верности\n"
-        "🗑 /clear_my_history — Очистить историю базы\n"
+        "🗑 /clear_my_history — Полное сбрасывание и очистка базы\n"
     )
     bot.reply_to(message, status_text, parse_mode="Markdown")
 
@@ -249,7 +249,6 @@ def show_statistics(message):
         all_texts = cursor.fetchall()
         conn.close()
         
-        # Считаем преобладающие эмоции по базе данных
         emotions_count = {"💖 Романтика": 0, "🤫 Скрытность": 0, "😡 Раздражение": 0, "😐 Нейтральные": 0}
         for t in all_texts:
             emo = analyze_emotion(t[0])
@@ -304,6 +303,9 @@ def search_messages(message):
     except Exception as e:
         bot.send_message(MY_TELEGRAM_ID, f"❌ Ошибка поиска: {e}")
 
+# ==========================================
+# ЖЁСТКАЯ ОЧИСТКА И ПЕРЕСОЗДАНИЕ БАЗЫ
+# ==========================================
 @bot.message_handler(commands=['clear_my_history'])
 def clear_history_db(message):
     if message.from_user.id != MY_TELEGRAM_ID:
@@ -311,12 +313,15 @@ def clear_history_db(message):
     try:
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM messages")
+        cursor.execute("DROP TABLE IF EXISTS messages")
         conn.commit()
         conn.close()
-        bot.send_message(MY_TELEGRAM_ID, "🗑 **База данных полностью очищена!**")
+        
+        init_db()
+        
+        bot.send_message(MY_TELEGRAM_ID, "🗑 **База данных полностью уничтожена и пересоздана с нуля! История абсолютно чиста.**", parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(MY_TELEGRAM_ID, f"❌ Ошибка: {e}")
+        bot.send_message(MY_TELEGRAM_ID, f"❌ Ошибка при очистке базы: {e}")
 
 @bot.message_handler(commands=['history'])
 def show_history_menu(message):
@@ -341,7 +346,7 @@ def handle_date_selection(call):
     
     if not messages:
         bot.answer_callback_query(call.id, "Пусто")
-        bot.send_message(MY_TELEGRAM_ID, f"🤷‍♂️ За дату {selected_date} сообщений нет.")
+        bot.send_message(MY_TELEGRAM_ID, f"🤷‍♂️ За дату {selected_date} сохраненных сообщений в базе нет.")
         return
     
     bot.answer_callback_query(call.id, f"Загружаю {len(messages)} шт.")
@@ -350,8 +355,6 @@ def handle_date_selection(call):
     for idx, msg in enumerate(messages, 1):
         msg_id, c_type, text, sender, chat, msg_time = msg
         text_preview = text if text else f"[{c_type.upper()} файл]"
-        
-        # Добавляем в вывод архива автоматический анализ эмоции сообщения
         emo_status = analyze_emotion(text)
         
         report += (
@@ -471,7 +474,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Любовный Архивариус V4 активен"
+    return "Любовный Архивариус V4.1 активен"
 
 def start_polling():
     while True:
