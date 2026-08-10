@@ -209,9 +209,9 @@ def send_welcome(message):
         return
         
     status_text = (
-        "🟢 **Архивариус V4.1 (Ташкент UTC+5)**\n\n"
+        "🟢 **Архивариус V4.2 (Ташкент UTC+5)**\n\n"
         "📜 **Доступные команды:**\n"
-        "📅 /history — Посмотреть архив по дням\n"
+        "📅 /history — Посмотреть архив переписок\n"
         "📊 /stats — Статистика базы и преобладающих эмоций\n"
         "🔍 /search <текст> — Быстрый поиск сообщений\n"
         "🔮 /astro <имя> — Сканер любовной совместимости и верности\n"
@@ -333,29 +333,42 @@ def show_history_menu(message):
     markup.add(types.InlineKeyboardButton(text=f"📅 Сегодня ({today})", callback_data=f"date_{today}"))
     markup.add(types.InlineKeyboardButton(text=f"📅 Вчера ({yesterday})", callback_data=f"date_{yesterday}"))
     markup.add(types.InlineKeyboardButton(text=f"📅 Позавчера ({prev_day})", callback_data=f"date_{prev_day}"))
+    markup.add(types.InlineKeyboardButton(text="📋 Все сообщения из базы", callback_data="date_all"))
     
-    bot.send_message(MY_TELEGRAM_ID, "Выбери дату для просмотра архива:", reply_markup=markup)
+    bot.send_message(MY_TELEGRAM_ID, "Выбери дату для просмотра архива или загрузи все записи:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("date_"))
 def handle_date_selection(call):
-    selected_date = call.data.split("_")[1]
-    messages = get_messages_by_date(selected_date)
+    selected = call.data.split("_")[1]
+    
+    if selected == "all":
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            cursor = conn.cursor()
+            cursor.execute("SELECT msg_id, content_type, text, sender_name, chat_title, time_str, date_str FROM messages ORDER BY timestamp DESC LIMIT 30")
+            rows = cursor.fetchall()
+            conn.close()
+            messages = [(r[0], r[1], r[2], r[3], r[4], f"{r[6]} {r[5]}") for r in rows]
+        except Exception:
+            messages = []
+    else:
+        messages = get_messages_by_date(selected)
     
     if not messages:
         bot.answer_callback_query(call.id, "Пусто")
-        bot.send_message(MY_TELEGRAM_ID, f"🤷‍♂️ За дату {selected_date} сохраненных сообщений в базе нет.")
+        bot.send_message(MY_TELEGRAM_ID, f"🤷‍♂️ За выбранный период сохраненных сообщений в базе нет.")
         return
     
     bot.answer_callback_query(call.id, f"Загружаю {len(messages)} шт.")
     
-    report = f"📋 Архив переписок за {selected_date}:\n\n"
+    report = f"📋 Архив переписок:\n\n"
     for idx, msg in enumerate(messages, 1):
         msg_id, c_type, text, sender, chat, msg_time = msg
         text_preview = text if text else f"[{c_type.upper()} файл]"
         emo_status = analyze_emotion(text)
         
         report += (
-            f"{idx}. 🕒 Время: {msg_time} | Энергетика: {emo_status}\n"
+            f"{idx}. 🕒 {msg_time} | Энергетика: {emo_status}\n"
             f"💬 Чат: {chat}\n"
             f"👤 Отправитель: {sender}\n"
             f"📝 Текст: {text_preview}\n"
@@ -471,7 +484,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Архивариус V4.1 активен"
+    return "Архивариус V4.2 активен"
 
 def start_polling():
     while True:
